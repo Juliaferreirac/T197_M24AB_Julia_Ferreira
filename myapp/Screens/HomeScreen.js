@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { collection, getDocs } from 'firebase/firestore';
-import styles from './homeStyles';
+import styles from './Styles/homeStyles';
 import { auth, db } from './firebaseconfig';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from './supabase';

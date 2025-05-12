@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import styles from './loginStyles';
+import styles from './Styles/loginStyles';
 import { supabase } from './supabase';
 import { auth, db } from './firebaseconfig';
 import firebase from 'firebase';
