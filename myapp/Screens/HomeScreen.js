@@ -9,9 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+//import * as DocumentPicker from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { collection, getDocs } from 'firebase/firestore';
-import styles from './Styles/homeStyles';
+import styles from './homeStyles';
 import { auth, db } from './firebaseconfig';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from './supabase';
@@ -96,12 +97,12 @@ export default function HomeScreen({ navigation, route }) {
 
   const filtrados = documentos.filter(
     (doc) =>
-      doc.arquivonome.toLowerCase().includes(busca.toLowerCase()) &&
+      doc.nome.toLowerCase().includes(busca.toLowerCase()) &&
       (!filtro || doc.status.toLowerCase().includes(filtro.toLowerCase()))
   );
 
   const alternarStatus = async (item) => {
-    const novosStatus = ['Novo', 'Em análise', 'Concluído'];
+    const novosStatus = ['Novo', 'Em análise', 'Em andamento', 'Aprovado', 'Recusado'];
     const indexAtual = novosStatus.indexOf(item.status);
     const proximoStatus = novosStatus[(indexAtual + 1) % novosStatus.length];
 
@@ -155,8 +156,10 @@ export default function HomeScreen({ navigation, route }) {
           onValueChange={(itemValue) => setFiltro(itemValue)}
           style={styles.input}>
           <Picker.Item label="Selecione a categoria" value="" />
-          <Picker.Item label="Concluído" value="concluído" />
+          <Picker.Item label="Aprovado" value="aprovado" />
           <Picker.Item label="Em análise" value="em análise" />
+          <Picker.Item label="Em andamento" value="em andamento" />
+          <Picker.Item label="Recusado" value="recusado" />
           <Picker.Item label="Novo" value="novo" />
         </Picker>
       </View>
@@ -179,10 +182,14 @@ export default function HomeScreen({ navigation, route }) {
                     styles.status,
                     {
                       backgroundColor:
-                        item.status === 'Concluído'
+                            item.status === 'Aprovado'
                           ? '#2ecc71'
                           : item.status === 'Em análise'
                           ? '#f39c12'
+                          : item.status === 'Recusado'
+                          ? '#e74c3c'
+                          : item.status === 'Em andamento'
+                          ? '#3498db'
                           : '#95a5a6',
                     },
                   ]}>
