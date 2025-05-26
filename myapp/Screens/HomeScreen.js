@@ -9,21 +9,26 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-//import * as DocumentPicker from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { collection, getDocs } from 'firebase/firestore';
 import styles from './homeStyles';
-import { auth, db } from './firebaseconfig';
-import { Picker } from '@react-native-picker/picker';
+// import { auth } from './firebaseconfig'; // Removido se não estiver usando Firebase Auth para logout
 import { supabase } from './supabase';
-import * as FileSystem from 'expo-file-system';
-import mime from 'mime';
+import DropDownPicker from 'react-native-dropdown-picker';
 
 export default function HomeScreen({ navigation, route }) {
   const { userName, userEmail } = route.params;
   const [documentos, setDocumentos] = useState([]);
   const [busca, setBusca] = useState('');
   const [filtro, setFiltro] = useState('');
+  const [open, setOpen] = useState(false);
+  const [dropdownItems, setDropdownItems] = useState([
+    { label: 'Todos', value: 'todos' },
+    { label: 'Aprovado', value: 'aprovado' },
+    { label: 'Em análise', value: 'em análise' },
+    { label: 'Em andamento', value: 'em andamento' },
+    { label: 'Recusado', value: 'recusado' },
+    { label: 'Novo', value: 'novo' },
+  ]);
 
   useEffect(() => {
     const carregarDocumentos = async () => {
@@ -32,7 +37,7 @@ export default function HomeScreen({ navigation, route }) {
       if (error) {
         console.error('Erro ao carregar documentos:', error);
       } else {
-        setDocumentos(data);
+        setDocumentos(data || []);
       }
     };
 
@@ -45,18 +50,17 @@ export default function HomeScreen({ navigation, route }) {
       copyToCacheDirectory: true,
     });
 
-    if (!result.canceled) {
+    if (!result.canceled && result.assets && result.assets.length > 0) {
       const file = result.assets[0];
       const fileUri = file.uri;
       const response = await fetch(fileUri);
       const blob = await response.blob();
-
       const path = `documentos/${Date.now()}_${file.name}`;
 
       const { error: uploadError } = await supabase.storage
         .from('documentos')
         .upload(path, blob, {
-          contentType: blob.type,
+          contentType: blob.type || file.mimeType || 'application/octet-stream',
         });
 
       if (uploadError) {
@@ -68,37 +72,56 @@ export default function HomeScreen({ navigation, route }) {
         .from('documentos')
         .getPublicUrl(path);
 
+      if (!publicUrlData || !publicUrlData.publicUrl) {
+          console.error('Erro ao obter URL pública.');
+          return;
+      }
+
       const novoDoc = {
         nome: userName,
-        tipo: blob.type,
-        tamanho: (file.size / 1024).toFixed(2),
+        tipo: blob.type || file.mimeType,
+        tamanho: file.size ? (file.size / 1024).toFixed(2) : 'N/A',
         uri: publicUrlData.publicUrl,
         status: 'Novo',
         arquivonome: file.name,
-        data: new Date().toLocaleDateString(),
+        data: new Date().toISOString(),
       };
 
-      const { error: insertError } = await supabase
+      const { data: insertedData, error: insertError } = await supabase
         .from('documentos')
-        .insert([novoDoc]);
+        .insert([novoDoc])
+        .select();
 
       if (insertError) {
         console.error('Erro ao salvar no Supabase:', insertError);
         return;
       }
 
-      setDocumentos((prev) => [...prev, novoDoc]);
+      if (insertedData && insertedData.length > 0) {
+        setDocumentos((prev) => [...prev, insertedData[0]]);
+      } else {
+        setDocumentos((prev) => [...prev, { ...novoDoc, id: Date.now().toString() }]);
+      }
     }
   };
 
   const abrirDocumento = async (uri) => {
-    await Linking.openURL(uri);
+    try {
+        const supported = await Linking.canOpenURL(uri);
+        if (supported) {
+            await Linking.openURL(uri);
+        } else {
+            console.error(`Não é possível abrir o link: ${uri}`);
+        }
+    } catch (error) {
+        console.error('Erro ao tentar abrir o documento:', error);
+    }
   };
 
   const filtrados = documentos.filter(
     (doc) =>
-      doc.nome.toLowerCase().includes(busca.toLowerCase()) &&
-      (!filtro || doc.status.toLowerCase().includes(filtro.toLowerCase()))
+      doc.arquivonome?.toLowerCase().includes(busca.toLowerCase()) &&
+      (!filtro || filtro.toLowerCase() === 'todos' || doc.status?.toLowerCase() === filtro.toLowerCase())
   );
 
   const alternarStatus = async (item) => {
@@ -125,11 +148,26 @@ export default function HomeScreen({ navigation, route }) {
 
   const handleLogout = async () => {
     try {
-      await auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+          console.error('Erro ao fazer logout no Supabase:', error);
+          return;
+      }
       navigation.navigate('Login');
     } catch (error) {
-      console.error('Erro ao fazer logout:', error);
+      console.error('Erro geral ao fazer logout:', error);
     }
+  };
+
+  const formatDisplayDate = (dateString) => {
+    if (!dateString) { 
+      return 'N/A';
+    }
+    const dateObject = new Date(dateString);
+    if (isNaN(dateObject.getTime())) {
+      return 'Data Inválida';
+    }
+    return dateObject.toLocaleDateString();
   };
 
   return (
@@ -139,74 +177,78 @@ export default function HomeScreen({ navigation, route }) {
       <View style={styles.header}>
         <Text style={styles.userText}>Olá, {userName}</Text>
         <TouchableOpacity onPress={handleLogout}>
-          <Text style={styles.logoutText}>Logout ↪</Text>
+          <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.filtros}>
         <TextInput
-          placeholder="Buscar..."
+          placeholder="Buscar por nome do arquivo..."
           placeholderTextColor="#aaa"
           style={styles.input}
           value={busca}
           onChangeText={setBusca}
         />
-        <Picker
-          selectedValue={filtro}
-          onValueChange={(itemValue) => setFiltro(itemValue)}
-          style={styles.input}>
-          <Picker.Item label="Selecione a categoria" value="" />
-          <Picker.Item label="Aprovado" value="aprovado" />
-          <Picker.Item label="Em análise" value="em análise" />
-          <Picker.Item label="Em andamento" value="em andamento" />
-          <Picker.Item label="Recusado" value="recusado" />
-          <Picker.Item label="Novo" value="novo" />
-        </Picker>
-      </View>
 
-      {/* LISTA SCROLLÁVEL */}
-      <View style={{ flex: 1 }}>
-        <FlatList
-          data={filtrados}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Text style={styles.cardText}>Cliente: {item.nome}</Text>
-              <Text style={styles.cardText}>Documento: {item.arquivonome}</Text>
-              <Text style={styles.cardText}>Data: {item.data}</Text>
-              <View style={styles.cardBottom}>
-                <TouchableOpacity
-                  onPress={() => alternarStatus(item)}
-                  style={[
-                    styles.status,
-                    {
-                      backgroundColor:
-                            item.status === 'Aprovado'
-                          ? '#2ecc71'
-                          : item.status === 'Em análise'
-                          ? '#f39c12'
-                          : item.status === 'Recusado'
-                          ? '#e74c3c'
-                          : item.status === 'Em andamento'
-                          ? '#3498db'
-                          : '#95a5a6',
-                    },
-                  ]}>
-                  <Text style={styles.statusText}>{item.status}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => abrirDocumento(item.uri)}
-                  style={styles.downloadButton}>
-                  <Text style={styles.downloadText}>Baixar ↓</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+        <DropDownPicker
+          open={open}
+          value={filtro}
+          items={dropdownItems}
+          setOpen={setOpen}
+          setValue={setFiltro}
+          setItems={setDropdownItems}
+          placeholder="Selecione a categoria"
+          containerStyle={{ marginTop: 10, zIndex: 1000 }}
+          style={{ backgroundColor: '#fff', borderColor: '#ccc' }}
+          dropDownContainerStyle={{ backgroundColor: '#eee' }}
+          zIndex={1000}
+          listMode="SCROLLVIEW"
         />
       </View>
 
-      {/* BOTÃO FIXO NO FINAL */}
+      <View style={{ flex: 1, marginTop: open ? 200 : 10 }}>
+        <FlatList
+          data={filtrados}
+          keyExtractor={(item) => item.id?.toString()}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => {
+            return (
+              <View style={styles.card}>
+                <Text style={styles.cardText}>Cliente: {item.nome}</Text>
+                <Text style={styles.cardText}>Documento: {item.arquivonome}</Text>
+                <Text style={styles.cardText}>Data: {formatDisplayDate(item.data)}</Text>
+                <View style={styles.cardBottom}>
+                  <TouchableOpacity
+                    onPress={() => alternarStatus(item)}
+                    style={[
+                      styles.status,
+                      {
+                        backgroundColor:
+                          item.status === 'Aprovado'
+                            ? '#2ecc71'
+                            : item.status === 'Em análise'
+                            ? '#f39c12'
+                            : item.status === 'Recusado'
+                            ? '#e74c3c'
+                            : item.status === 'Em andamento'
+                            ? '#3498db'
+                            : '#95a5a6',
+                      },
+                    ]}>
+                    <Text style={styles.statusText}>{item.status}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => abrirDocumento(item.uri)}
+                    style={styles.downloadButton}>
+                    <Text style={styles.downloadText}>Baixar ↓</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          }}
+        />
+      </View>
+
       <View style={styles.fixedButtonContainer}>
         <TouchableOpacity style={styles.uploadBtn} onPress={pickDocument}>
           <Text style={styles.uploadText}>+ Selecionar Documento</Text>
