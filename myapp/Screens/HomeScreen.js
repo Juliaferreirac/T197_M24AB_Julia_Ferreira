@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import styles from './homeStyles';
-// import { auth } from './firebaseconfig'; // Removido se não estiver usando Firebase Auth para logout
 import { supabase } from './supabase';
 import DropDownPicker from 'react-native-dropdown-picker';
 
@@ -53,18 +52,22 @@ export default function HomeScreen({ navigation, route }) {
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const file = result.assets[0];
       const fileUri = file.uri;
+
       const response = await fetch(fileUri);
       const blob = await response.blob();
-      const path = `documentos/${Date.now()}_${file.name}`;
+
+      const path = `public/documentos/${Date.now()}_${file.name}`;
 
       const { error: uploadError } = await supabase.storage
         .from('documentos')
         .upload(path, blob, {
           contentType: blob.type || file.mimeType || 'application/octet-stream',
+          cacheControl: '3600',
+          upsert: false,
         });
 
       if (uploadError) {
-        console.error('Erro ao fazer upload:', uploadError);
+        console.error('Erro ao fazer upload para o Storage:', uploadError);
         return;
       }
 
@@ -73,14 +76,14 @@ export default function HomeScreen({ navigation, route }) {
         .getPublicUrl(path);
 
       if (!publicUrlData || !publicUrlData.publicUrl) {
-          console.error('Erro ao obter URL pública.');
-          return;
+        console.error('Erro ao obter URL pública do documento.');
+        return;
       }
 
       const novoDoc = {
         nome: userName,
         tipo: blob.type || file.mimeType,
-        tamanho: file.size ? (file.size / 1024).toFixed(2) : 'N/A',
+        tamanho: file.size ? (file.size / 1024).toFixed(2) + ' KB' : 'N/A',
         uri: publicUrlData.publicUrl,
         status: 'Novo',
         arquivonome: file.name,
@@ -93,7 +96,7 @@ export default function HomeScreen({ navigation, route }) {
         .select();
 
       if (insertError) {
-        console.error('Erro ao salvar no Supabase:', insertError);
+        console.error('Erro ao salvar metadados do documento no Supabase:', insertError);
         return;
       }
 
@@ -107,14 +110,14 @@ export default function HomeScreen({ navigation, route }) {
 
   const abrirDocumento = async (uri) => {
     try {
-        const supported = await Linking.canOpenURL(uri);
-        if (supported) {
-            await Linking.openURL(uri);
-        } else {
-            console.error(`Não é possível abrir o link: ${uri}`);
-        }
+      const supported = await Linking.canOpenURL(uri);
+      if (supported) {
+        await Linking.openURL(uri);
+      } else {
+        console.error(`Não é possível abrir o link: ${uri}`);
+      }
     } catch (error) {
-        console.error('Erro ao tentar abrir o documento:', error);
+      console.error('Erro ao tentar abrir o documento:', error);
     }
   };
 
@@ -150,8 +153,8 @@ export default function HomeScreen({ navigation, route }) {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-          console.error('Erro ao fazer logout no Supabase:', error);
-          return;
+        console.error('Erro ao fazer logout no Supabase:', error);
+        return;
       }
       navigation.navigate('Login');
     } catch (error) {
@@ -159,15 +162,20 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  const formatDisplayDate = (dateString) => {
-    if (!dateString) { 
+  const formatDisplayDateOnly = (dateString) => {
+    if (!dateString) {
       return 'N/A';
     }
     const dateObject = new Date(dateString);
     if (isNaN(dateObject.getTime())) {
       return 'Data Inválida';
     }
-    return dateObject.toLocaleDateString();
+    const options = {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    };
+    return dateObject.toLocaleDateString('pt-BR', options);
   };
 
   return (
@@ -197,7 +205,7 @@ export default function HomeScreen({ navigation, route }) {
           setOpen={setOpen}
           setValue={setFiltro}
           setItems={setDropdownItems}
-          placeholder="Selecione a categoria"
+          placeholder="Filtrar por status"
           containerStyle={{ marginTop: 10, zIndex: 1000 }}
           style={{ backgroundColor: '#fff', borderColor: '#ccc' }}
           dropDownContainerStyle={{ backgroundColor: '#eee' }}
@@ -206,46 +214,40 @@ export default function HomeScreen({ navigation, route }) {
         />
       </View>
 
-      <View style={{ flex: 1, marginTop: open ? 200 : 10 }}>
+      <View style={{ flex: 1, marginTop: open ? (Platform.OS === 'ios' ? 200 : 250) : 10 }}>
         <FlatList
           data={filtrados}
           keyExtractor={(item) => item.id?.toString()}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => {
-            return (
-              <View style={styles.card}>
-                <Text style={styles.cardText}>Cliente: {item.nome}</Text>
-                <Text style={styles.cardText}>Documento: {item.arquivonome}</Text>
-                <Text style={styles.cardText}>Data: {formatDisplayDate(item.data)}</Text>
-                <View style={styles.cardBottom}>
-                  <TouchableOpacity
-                    onPress={() => alternarStatus(item)}
-                    style={[
-                      styles.status,
-                      {
-                        backgroundColor:
-                          item.status === 'Aprovado'
-                            ? '#2ecc71'
-                            : item.status === 'Em análise'
-                            ? '#f39c12'
-                            : item.status === 'Recusado'
-                            ? '#e74c3c'
-                            : item.status === 'Em andamento'
-                            ? '#3498db'
-                            : '#95a5a6',
-                      },
-                    ]}>
-                    <Text style={styles.statusText}>{item.status}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => abrirDocumento(item.uri)}
-                    style={styles.downloadButton}>
-                    <Text style={styles.downloadText}>Baixar ↓</Text>
-                  </TouchableOpacity>
-                </View>
+          renderItem={({ item }) => (
+            <View style={styles.card}>
+              <Text style={styles.cardText}>Cliente: {item.nome}</Text>
+              <Text style={styles.cardText}>Documento: {item.arquivonome}</Text>
+              <Text style={styles.cardText}>Data: {formatDisplayDateOnly(item.data)}</Text>
+              <View style={styles.cardBottom}>
+                <TouchableOpacity
+                  onPress={() => alternarStatus(item)}
+                  style={[
+                    styles.status,
+                    {
+                      backgroundColor:
+                        item.status === 'Aprovado' ? '#2ecc71' :
+                        item.status === 'Em análise' ? '#f39c12' :
+                        item.status === 'Recusado' ? '#e74c3c' :
+                        item.status === 'Em andamento' ? '#3498db' :
+                        '#95a5a6',
+                    },
+                  ]}>
+                  <Text style={styles.statusText}>{item.status}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => abrirDocumento(item.uri)}
+                  style={styles.downloadButton}>
+                  <Text style={styles.downloadText}>Baixar ↓</Text>
+                </TouchableOpacity>
               </View>
-            );
-          }}
+            </View>
+          )}
         />
       </View>
 
